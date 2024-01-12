@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "clickhouse-format-service"
+version = "0.0.1"
+description = "Clickhouse format as an api via docker"
+authors = ["Emir Karamehmetoglu <emirk@axis.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.109.0"
+docker = "^7.0.0"
+uvicorn = "^0.25.0"
+gunicorn = "^21.2.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
