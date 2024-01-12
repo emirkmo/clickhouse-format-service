@@ -3,8 +3,10 @@ from collections import namedtuple
 from docker.models.images import Image
 from docker.client import DockerClient
 
-IMAGE_NAME = "clickhouse-format-docker:latest"
-DEFAULT_VERSION = "23.11.3.23"
+
+IMAGE_NAME = "clickhouse-format-docker"
+CLICKHOUSE_VERSION = "23.11.3.23"
+CH_DOCKER = f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}-alpine"
 DOCKERFILE_PATH = "clickhouse-format-docker/Dockerfile"
 
 DockerImage = namedtuple(
@@ -41,8 +43,9 @@ async def yield_from_built_images(
         if image_name in str(image):
             yield image
 
+
 async def build_clickhouse_format_docker_image(
-    client: DockerClient, version: str = DEFAULT_VERSION
+    client: DockerClient, version: str = CLICKHOUSE_VERSION
 ) -> Image:
     """Build the clickhouse format docker image and return it"""
     with open(DOCKERFILE_PATH) as dockerfile:
