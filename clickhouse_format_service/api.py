@@ -1,70 +1,86 @@
-from fastapi import Depends, FastAPI
-from typing import cast, Annotated, AsyncIterator
-from docker.client import DockerClient
-from docker.errors import ContainerError
-from pydantic import BaseModel
+from fastapi import FastAPI, Depends, Security
+from typing import Annotated
+import subprocess
 import logging
+from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
 
-from clickhouse_format_service.docker_image import (
-    DockerImage,
-    yield_from_built_images,
-    CH_DOCKER,
-)
+from .auth import get_api_key
 
+CLICKHOUSE_VERSION = "23.11.3.23"
 app = FastAPI(title="Clickhouse Format Service", version="0.1.0")
 
-
-async def get_docker_client() -> AsyncIterator[DockerClient]:
-    """context manager for docker client that ensures its closure after use. Meant
-    to be used with dependency-injection in FastAPI via `Depends`"""
-    client = DockerClient.from_env()
-    try:
-        yield client
-    finally:
-        client.close()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
-INJECTED_DOCKER_CLIENT = Annotated[DockerClient, Depends(get_docker_client)]
+AUTH_TOKEN = Annotated[str, Depends(oauth2_scheme)]
+
+
+class User(BaseModel):
+    """User model for OAuth2"""
+
+    username: str
+    email: str | None = None
+    full_name: str | None = None
+    disabled: bool | None = None
+
+
+def fake_decode_token(token):
+    return User(
+        username=token + "fakedecoded", email="john@example.com", full_name="John Doe"
+    )
+
+
+async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
+    return fake_decode_token(token)
 
 
 @app.get("/")
-async def get_current_docker_info(client: INJECTED_DOCKER_CLIENT) -> list[DockerImage]:
-    """Return clickhouse version and docker image info"""
-
-    return [
-        cast(DockerImage, image.attrs)
-        async for image in yield_from_built_images("", client)
-    ]
+async def get_current_docker_info() -> str:
+    """Return clickhouse version"""
+    return CLICKHOUSE_VERSION
 
 
-class SQL(BaseModel):
-    sql: str
+def filter_jemalloc_statement(stderr: str) -> str:
+    """https://github.com/ClickHouse/ClickHouse/issues/15611
+    This can be printed to stderr when we don't want it to be."""
+    lines = stderr.split("\n")
+    catch_phrase = "<jemalloc>: Number of CPUs detected"
+    return "\n".join([line for line in lines if catch_phrase not in line])
+
+
+async def run_clickhouse_format(sql: str) -> str:
+    """Take a SQL string and run it through clickhouse format invoked via subprocess
+    clickhouse format --quiet --multiquery --query `sql`. However, we make it safe
+    against injection and follow best practices for subprocess invocations."""
+
+    try:
+        completed_process = subprocess.run(
+            ["clickhouse", "format", "--quiet", "--multiquery"],
+            input=sql,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        output = filter_jemalloc_statement(completed_process.stderr)
+    except subprocess.CalledProcessError as e:
+        if not e.stderr:
+            raise e
+
+        output = filter_jemalloc_statement(e.stderr)
+
+    for line in output.split("\n"):
+        logging.getLogger("uvicorn.error").info(f"{line}")
+
+    return output
 
 
 @app.post("/")
-async def clickhouse_format_sql(sql: str, client: INJECTED_DOCKER_CLIENT) -> str:
+async def clickhouse_format_sql(sql: str, api_key: str = Security(get_api_key)) -> str:
     """Get the first image matching the name or build the image if it does not exist,
     then run the container for that image feeding the input in and returning the container
     output"""
+    logging.getLogger("uvicorn.error").info(f"{api_key=}")
     logging.getLogger("uvicorn.error").debug(f"received SQL: {sql}")
 
-    try:
-        output = client.containers.run(
-            CH_DOCKER,
-            entrypoint=["clickhouse", "format", "--quiet", "--multiquery", "--query"],
-            command=f"'{sql}'",
-            remove=True,
-        )
-    except ContainerError as e:
-        logging.getLogger("uvicorn.error").debug(
-            f"Command '{e.command}' in image '{e.image}' "
-            f"returned non-zero exit status {e.exit_status}{e.stderr}"
-        )
-        output = e.stderr
-
-    if isinstance(output, bytes):
-        return output.decode("utf-8")
-    elif isinstance(output, str):
-        return output
-
-    raise TypeError(f"container output is not bytes/str: {output}")
+    return await run_clickhouse_format(sql)

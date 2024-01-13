@@ -81,4 +81,5 @@ COPY clickhouse_format_service ./clickhouse_format_service
 
 EXPOSE 8080
 
-CMD ["uvicorn", "clickhouse_format_service.api:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--log-level", "info"]
+# --reload is just for development
+CMD ["uvicorn", "clickhouse_format_service.api:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--log-level", "info", "--reload"]

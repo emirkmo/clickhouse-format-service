@@ -1,10 +1,4 @@
 services:
-  # ch-format:
-  #   image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
-  #   container_name: clickhouse-format-docker
-  #   command: ["bin/bash"]
-  #   entrypoint: [ "clickhouse", "format", "--quiet", "--multiquery", "--query" ]
-
   api:
     container_name: api
     build:
@@ -15,7 +9,15 @@ services:
       - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./clickhouse_format_service:/app/clickhouse_format_service
     restart: always
+    env_file:
+      - .env
+    # develop:
+    #   watch:
+    #     - path: ./clickhouse_format_service
+    #       action: sync
+    #       target: /app/clickhouse_format_service
 
   caddy:
     container_name: caddy
