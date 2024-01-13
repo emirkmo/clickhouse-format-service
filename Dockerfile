@@ -1,8 +1,36 @@
 # https://github.com/thehale/docker-python-poetry
+ARG CLICKHOUSE_VERSION=23.11.3.23
+
+FROM clickhouse/clickhouse-server:${CLICKHOUSE_VERSION} as clickhouse-stage
+
+RUN echo "Clickhouse Image Version: ${CLICKHOUSE_VERSION}"
+
 # FROM thehale/python-poetry:1.6.1-py3.12-slim
-FROM python:3.12-slim-bookworm as poetry-installer
+FROM python:3.12-slim-bookworm as base-image
 
 ARG POETRY_VERSION=1.7.1
+
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+    && apt-get install --no-install-recommends -y build-essential \
+    && rm -rf /var/lib/apt/lists/* && apt-get purge -y --auto-remove \
+    && rm -rf /etc/apt/sources.list.d/temp.list
+
+# RUN GNUPGHOME=$(mktemp -d)
+# RUN GNUPGHOME="$GNUPGHOME" gpg --no-default-keyring --keyring /usr/share/keyrings/clickhouse-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 8919F6BD2B48D754
+# RUN rm -rf "$GNUPGHOME"
+# RUN chmod +r /usr/share/keyrings/clickhouse-keyring.gpg
+
+# RUN echo "deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg] https://packages.clickhouse.com/deb stable main" | tee \
+#     /etc/apt/sources.list.d/clickhouse.list
+# RUN DEBIAN_FRONTEND=noninteractive apt-get update
+
+# FROM clickhouse-setup as clickhouse-installer
+
+# RUN DEBIAN_FRONTEND=noninteractive apt-get install -y clickhouse-common-static=${CLICKHOUSE_VERSION} \
+#     && rm -rf /var/lib/apt/lists/* && apt-get purge -y --auto-remove \
+#     && rm -rf /etc/apt/sources.list.d/temp.list
+
+FROM base-image as poetry-installer
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=on \
@@ -10,11 +38,6 @@ ENV PYTHONUNBUFFERED=1 \
     POETRY_HOME="/opt/poetry" \
     POETRY_NO_INTERACTION=1 \
     POETRY_CACHE_DIR=/tmp/poetry_cache
-
-RUN DEBIAN_FRONTEND=noninteractive apt-get update \
-    && apt-get install --no-install-recommends -y build-essential \
-    && rm -rf /var/lib/apt/lists/* && apt-get purge -y --auto-remove \
-    && rm -rf /etc/apt/sources.list.d/temp.list
 
 # https://python-poetry.org/docs/#installing-manually
 RUN python -m venv ${POETRY_HOME}
@@ -39,6 +62,12 @@ RUN touch README.md
 RUN ${POETRY_HOME}/bin/poetry install --no-root --without=dev && rm -rf $POETRY_CACHE_DIR
 
 FROM python:3.12-slim-bookworm as production-image
+
+FROM production-image as clickhouse-installer
+
+COPY --from=clickhouse-stage /usr/bin/clickhouse /usr/bin/clickhouse
+
+FROM clickhouse-installer as api
 
 WORKDIR /app
 
